@@ -1,7 +1,9 @@
 import random
 from collections.abc import Mapping, Sequence
+
 import numpy as np
 import torch
+
 # import trimesh
 from torch.utils.data.dataloader import default_collate
 
@@ -40,19 +42,14 @@ def collate_fn(batch):
 
 
 def point_collate_fn(batch, mix_prob=0):
-    assert isinstance(
-        batch[0], Mapping
-    )  # currently, only support input_dict, rather than input_list
+    assert isinstance(batch[0], Mapping)  # currently, only support input_dict, rather than input_list
     batch = collate_fn(batch)
     if "offset" in batch.keys():
         # Mix3d (https://arxiv.org/pdf/2110.02210.pdf)
         if random.random() < mix_prob:
-            batch["offset"] = torch.cat(
-                [batch["offset"][1:-1:2], batch["offset"][-1].unsqueeze(0)], dim=0
-            )
+            batch["offset"] = torch.cat([batch["offset"][1:-1:2], batch["offset"][-1].unsqueeze(0)], dim=0)
     return batch
 
 
 def gaussian_kernel(dist2: np.array, a: float = 1, c: float = 5):
     return a * np.exp(-dist2 / (2 * c**2))
-

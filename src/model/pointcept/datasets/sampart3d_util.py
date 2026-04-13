@@ -1,10 +1,11 @@
-import numpy as np
-import trimesh
-import os
 import json
 import math
+import os
+
+import numpy as np
 import open3d as o3d
 import torch
+import trimesh
 
 
 def sample_surface(mesh, count, face_weight=None, sample_color=False, seed=147):
@@ -84,9 +85,7 @@ def get_ray_directions(W, H, fx, fy, cx, cy, use_pixel_centers=True):
         np.arange(H, dtype=np.float32) + pixel_center,
         indexing="xy",
     )
-    directions = np.stack(
-        [(i - cx) / fx, -(j - cy) / fy, -np.ones_like(i)], -1
-    ) 
+    directions = np.stack([(i - cx) / fx, -(j - cy) / fy, -np.ones_like(i)], -1)
 
     return directions
 
@@ -94,17 +93,13 @@ def get_ray_directions(W, H, fx, fy, cx, cy, use_pixel_centers=True):
 def gen_pcd(depth, c2w_opengl, camera_angle_x):
 
     h, w = depth.shape
-    
+
     depth_valid = depth < 65500.0
     depth = depth[depth_valid]
-    focal = (
-        0.5 * w / math.tan(0.5 * camera_angle_x)
-    )  # scaled focal length
+    focal = 0.5 * w / math.tan(0.5 * camera_angle_x)  # scaled focal length
     ray_directions = get_ray_directions(w, h, focal, focal, w // 2, h // 2)
     points_c = ray_directions[depth_valid] * depth[:, None]
-    points_c_homo = np.concatenate(
-        [points_c, np.ones_like(points_c[..., :1])], axis=-1
-    )
+    points_c_homo = np.concatenate([points_c, np.ones_like(points_c[..., :1])], axis=-1)
     org_points = (points_c_homo @ c2w_opengl.T)[..., :3]
 
     return org_points
@@ -141,7 +136,7 @@ def vis_pcd_feat(coord, point_feat, save_path):
             t0 = X - self.mean_.unsqueeze(0)
             projected = t0 @ self.components_.T
             return projected
-        
+
     fit_pca = TorchPCA(n_components=3).fit(point_feat)
     x_red = fit_pca.transform(point_feat)
     if isinstance(x_red, np.ndarray):

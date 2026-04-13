@@ -1,35 +1,33 @@
-'''
+"""
 inject the result in res.npz into model.vrm and exports as res_textured.vrm
-'''
-import argparse
-import yaml
-import os
-import numpy as np
-from numpy import ndarray
-
-from typing import Tuple, Union, List
+"""
 
 import argparse
-from tqdm import tqdm
-from box import Box
-
-from scipy.spatial import cKDTree
-
-import open3d as o3d
 import itertools
+import os
+from typing import List, Tuple, Union
 
 import bpy
+import numpy as np
+import open3d as o3d
+import yaml
+from box import Box
 from mathutils import Vector
+from numpy import ndarray
+from scipy.spatial import cKDTree
+from tqdm import tqdm
 
+from ..data.extract import get_arranged_bones, process_armature, process_mesh
 from ..data.raw_data import RawData, RawSkin
-from ..data.extract import process_mesh, process_armature, get_arranged_bones
+
 
 def parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str)
-    parser.add_argument('--num_runs', type=int)
-    parser.add_argument('--id', type=int)
+    parser.add_argument("--config", type=str)
+    parser.add_argument("--num_runs", type=int)
+    parser.add_argument("--id", type=int)
     return parser.parse_args()
+
 
 def clean_bpy():
     for c in bpy.data.actions:
@@ -51,17 +49,18 @@ def clean_bpy():
     for c in bpy.data.textures:
         bpy.data.textures.remove(c)
 
-def load(filepath: str, return_armature: bool=False):
+
+def load(filepath: str, return_armature: bool = False):
     if return_armature:
         old_objs = set(bpy.context.scene.objects)
 
     if not os.path.exists(filepath):
-        raise ValueError(f'File {filepath} does not exist !')
+        raise ValueError(f"File {filepath} does not exist !")
     try:
         if filepath.endswith(".vrm"):
             # enable vrm addon and load vrm model
-            bpy.ops.preferences.addon_enable(module='vrm')
-            
+            bpy.ops.preferences.addon_enable(module="vrm")
+
             bpy.ops.import_scene.vrm(
                 filepath=filepath,
                 use_addon_preferences=True,
@@ -72,7 +71,7 @@ def load(filepath: str, return_armature: bool=False):
                 set_armature_display_to_wire=True,
                 set_armature_display_to_show_in_front=True,
                 set_armature_bone_shape_to_default=True,
-                disable_bake=True, # customized option for better performance
+                disable_bake=True,  # customized option for better performance
             )
         elif filepath.endswith(".obj"):
             bpy.ops.wm.obj_import(filepath=filepath)
@@ -93,32 +92,33 @@ def load(filepath: str, return_armature: bool=False):
     except:
         raise ValueError(f"failed to load {filepath}")
     if return_armature:
-        armature = [x for x in set(bpy.context.scene.objects)-old_objs if x.type=="ARMATURE"]
-        if len(armature)==0:
+        armature = [x for x in set(bpy.context.scene.objects) - old_objs if x.type == "ARMATURE"]
+        if len(armature) == 0:
             return None
-        if len(armature)>1:
+        if len(armature) > 1:
             raise ValueError(f"multiple armatures found")
         armature = armature[0]
-        
+
         armature.select_set(True)
         bpy.context.view_layer.objects.active = armature
-        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.object.mode_set(mode="EDIT")
         for bone in bpy.data.armatures[0].edit_bones:
-            bone.roll = 0. # change all roll to 0. to prevent weird behaviour
+            bone.roll = 0.0  # change all roll to 0. to prevent weird behaviour
 
-        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.mode_set(mode="OBJECT")
         armature.select_set(False)
-        
-        bpy.ops.object.select_all(action='DESELECT')
+
+        bpy.ops.object.select_all(action="DESELECT")
         return armature
+
 
 def get_skin(arranged_bones):
     meshes = []
     for v in bpy.data.objects:
-        if v.type == 'MESH':
+        if v.type == "MESH":
             meshes.append(v)
     index = {}
-    for (id, pbone) in enumerate(arranged_bones):
+    for id, pbone in enumerate(arranged_bones):
         index[pbone.name] = id
     _dict_skin = {}
     total_bones = len(arranged_bones)
@@ -134,33 +134,31 @@ def get_skin(arranged_bones):
             gidx = obj.vertex_groups[bone.name].index
             bone_verts = [v for v in obj_verts if gidx in [g.group for g in v.groups]]
             for v in bone_verts:
-                which = [id for id in range(len(v.groups)) if v.groups[id].group==gidx]
+                which = [id for id in range(len(v.groups)) if v.groups[id].group == gidx]
                 w = v.groups[which[0]].weight
                 skin_weight[v.index, index[bone.name]] = w
         _dict_skin[obj.name] = {
-            'skin': skin_weight,
+            "skin": skin_weight,
         }
-    
-    skin = np.concatenate([
-        _dict_skin[d]['skin'] for d in _dict_skin
-    ], axis=0)
+
+    skin = np.concatenate([_dict_skin[d]["skin"] for d in _dict_skin], axis=0)
     return skin
+
 
 def axis(a: np.ndarray):
     b = np.concatenate([-a[:, 0:1], -a[:, 1:2], a[:, 2:3]], axis=1)
     return b
 
-def get_correct_orientation_kdtree(a: np.ndarray, b: np.ndarray, bones: np.ndarray, num: int=16384) -> np.ndarray:
-    '''
+
+def get_correct_orientation_kdtree(a: np.ndarray, b: np.ndarray, bones: np.ndarray, num: int = 16384) -> np.ndarray:
+    """
     a: sampled_vertiecs
     b: mesh_vertices
-    '''
-    min_loss = float('inf')
+    """
+    min_loss = float("inf")
     best_transformed = a.copy()
     axis_permutations = list(itertools.permutations([0, 1, 2]))
-    sign_combinations = [(x, y, z) for x in [1, -1] 
-                        for y in [1, -1] 
-                        for z in [1, -1]]
+    sign_combinations = [(x, y, z) for x in [1, -1] for y in [1, -1] for z in [1, -1]]
     _bones = bones.copy()
     for perm in axis_permutations:
         permuted_a = a[np.random.permutation(a.shape[0])[:num]][:, perm]
@@ -169,13 +167,14 @@ def get_correct_orientation_kdtree(a: np.ndarray, b: np.ndarray, bones: np.ndarr
             tree = cKDTree(transformed)
             distances, indices = tree.query(b)
             current_loss = distances.mean()
-            if current_loss < min_loss: # prevent from mirroring
+            if current_loss < min_loss:  # prevent from mirroring
                 min_loss = current_loss
                 best_transformed = a[:, perm] * np.array(signs)
                 bones[:, :3] = _bones[:, :3][:, perm] * np.array(signs)
                 bones[:, 3:] = _bones[:, 3:][:, perm] * np.array(signs)
-    
+
     return best_transformed, bones
+
 
 def denormalize_vertices(mesh_vertices: ndarray, vertices: ndarray, bones: ndarray) -> np.ndarray:
     min_vals = np.min(mesh_vertices, axis=0)
@@ -189,31 +188,33 @@ def denormalize_vertices(mesh_vertices: ndarray, vertices: ndarray, bones: ndarr
 
     return denormalized_vertices, denormalized_bones
 
+
 def get_matrix(ob):
     m = np.eye(4)
     while ob:
-        if hasattr(ob, 'matrix_world'):
+        if hasattr(ob, "matrix_world"):
             m = m @ np.array(ob.matrix_world)
         ob = ob.parent
     return m
 
+
 def make_armature(
     vertices: ndarray,
-    bones: ndarray, # (joint, tail)
+    bones: ndarray,  # (joint, tail)
     parents: list[Union[int, None]],
     names: list[str],
     skin: ndarray,
-    group_per_vertex: int=4,
-    add_root: bool=False,
-    is_vrm: bool=False,
+    group_per_vertex: int = 4,
+    add_root: bool = False,
+    is_vrm: bool = False,
 ):
     context = bpy.context
-    
+
     mesh_vertices = []
     local_coord = np.eye(4)
     local_parent = None
     for ob in bpy.data.objects:
-        if ob.type != 'MESH':
+        if ob.type != "MESH":
             continue
         if ob.parent is not None:
             local_coord = get_matrix(ob.parent)
@@ -226,22 +227,23 @@ def make_armature(
 
     mesh_vertices = np.stack(mesh_vertices)
     vertices, bones = denormalize_vertices(mesh_vertices, vertices, bones)
-    
+
     bpy.ops.object.add(type="ARMATURE", location=(0, 0, 0))
     armature = context.object
-    if hasattr(armature.data, 'vrm_addon_extension'):
+    if hasattr(armature.data, "vrm_addon_extension"):
         armature.data.vrm_addon_extension.spec_version = "1.0"
         humanoid = armature.data.vrm_addon_extension.vrm1.humanoid
         is_vrm = True
     bpy.ops.object.mode_set(mode="EDIT")
     edit_bones = armature.data.edit_bones
     if add_root:
-        bone_root = edit_bones.new('Root')
-        bone_root.name = 'Root'
-        bone_root.head = (0., 0., 0.)
+        bone_root = edit_bones.new("Root")
+        bone_root.name = "Root"
+        bone_root.head = (0.0, 0.0, 0.0)
         bone_root.tail = (bones[0, 0], bones[0, 1], bones[0, 2])
-    
+
     J = len(names)
+
     def extrude_bone(
         name: Union[None, str],
         parent_name: Union[None, str],
@@ -256,7 +258,7 @@ def make_armature(
             return
         parent_bone = edit_bones.get(parent_name)
         bone.parent = parent_bone
-        bone.use_connect = False # always False currently
+        bone.use_connect = False  # always False currently
 
     vertices, bones = get_correct_orientation_kdtree(vertices, mesh_vertices, bones)
     inv = np.linalg.inv(local_coord)
@@ -264,32 +266,32 @@ def make_armature(
     bones[:, 3:] = (inv[:3, :3] @ bones[:, 3:].T + inv[:3, 3:4]).T
     for i in range(J):
         if add_root:
-            pname = 'Root' if parents[i] is None else names[parents[i]]
+            pname = "Root" if parents[i] is None else names[parents[i]]
         else:
             pname = None if parents[i] is None else names[parents[i]]
         extrude_bone(names[i], pname, bones[i, :3], bones[i, 3:])
 
     # must set to object mode to enable parent_set
-    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.mode_set(mode="OBJECT")
     objects = bpy.data.objects
     for o in bpy.context.selected_objects:
         o.select_set(False)
-    
+
     argsorted = np.argsort(-skin, axis=1)
     vertex_group_reweight = skin[np.arange(skin.shape[0])[..., None], argsorted]
-    vertex_group_reweight = vertex_group_reweight / vertex_group_reweight[..., :group_per_vertex].sum(axis=1)[...,None]
+    vertex_group_reweight = vertex_group_reweight / vertex_group_reweight[..., :group_per_vertex].sum(axis=1)[..., None]
     vertex_group_reweight = np.nan_to_num(vertex_group_reweight)
     tree = cKDTree(vertices)
     for ob in objects:
-        if ob.type != 'MESH':
+        if ob.type != "MESH":
             continue
         ob.select_set(True)
         armature.select_set(True)
-        bpy.ops.object.parent_set(type='ARMATURE_NAME')
+        bpy.ops.object.parent_set(type="ARMATURE_NAME")
         vis = []
         for x in ob.vertex_groups:
             vis.append(x.name)
-        
+
         n_vertices = []
         m = local_coord @ np.array(ob.matrix_world)
         matrix_world_rot = m[:3, :3]
@@ -308,18 +310,18 @@ def make_armature(
                 n = names[i]
                 if n not in ob.vertex_groups:
                     continue
-                        
-                ob.vertex_groups[n].add([v], vertex_group_reweight[index[v], ii], 'REPLACE')
+
+                ob.vertex_groups[n].add([v], vertex_group_reweight[index[v], ii], "REPLACE")
         armature.select_set(False)
         ob.select_set(False)
     armature.parent = local_parent
-    
+
     # set vrm bones link
     if is_vrm:
         armature.data.vrm_addon_extension.spec_version = "1.0"
         humanoid.human_bones.hips.node.bone_name = "J_Bip_C_Hips"
         humanoid.human_bones.spine.node.bone_name = "J_Bip_C_Spine"
-        
+
         humanoid.human_bones.chest.node.bone_name = "J_Bip_C_Chest"
         humanoid.human_bones.neck.node.bone_name = "J_Bip_C_Neck"
         humanoid.human_bones.head.node.bone_name = "J_Bip_C_Head"
@@ -335,8 +337,9 @@ def make_armature(
         humanoid.human_bones.right_upper_arm.node.bone_name = "J_Bip_R_UpperArm"
         humanoid.human_bones.right_lower_arm.node.bone_name = "J_Bip_R_LowerArm"
         humanoid.human_bones.right_hand.node.bone_name = "J_Bip_R_Hand"
-        
+
         bpy.ops.vrm.assign_vrm1_humanoid_human_bones_automatically(armature_name="Armature")
+
 
 def merge(
     path: str,
@@ -347,12 +350,12 @@ def merge(
     parents: List[Union[None, int]],
     names: List[str],
     tails: ndarray,
-    add_root: bool=False,
-    is_vrm: bool=False,
+    add_root: bool = False,
+    is_vrm: bool = False,
 ):
-    '''
+    """
     Merge skin and bone into original file.
-    '''
+    """
     clean_bpy()
     try:
         load(path)
@@ -361,7 +364,7 @@ def merge(
         return
     for c in bpy.data.armatures:
         bpy.data.armatures.remove(c)
-    
+
     bones = np.concatenate([joints, tails], axis=1)
     # if the result is weired, orientation may be wrong
     make_armature(
@@ -374,9 +377,9 @@ def merge(
         add_root=add_root,
         is_vrm=is_vrm,
     )
-    
+
     dirpath = os.path.dirname(output_path)
-    if dirpath != '':
+    if dirpath != "":
         os.makedirs(dirpath, exist_ok=True)
     try:
         if is_vrm:
@@ -395,38 +398,42 @@ def merge(
     except:
         raise ValueError(f"failed to export {output_path}")
 
+
 def str2bool(v):
     if isinstance(v, bool):
         return v
-    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+    if v.lower() in ("yes", "true", "t", "y", "1"):
         return True
-    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+    elif v.lower() in ("no", "false", "f", "n", "0"):
         return False
     else:
-        raise argparse.ArgumentTypeError('Boolean value expected.')
+        raise argparse.ArgumentTypeError("Boolean value expected.")
+
 
 def nullable_string(val):
     if not val:
         return None
     return val
 
+
 def parse():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--require_suffix', type=str, required=True)
-    parser.add_argument('--num_runs', type=int, required=True)
-    parser.add_argument('--id', type=int, required=True)
-    parser.add_argument('--data_config', type=str, required=False)
-    parser.add_argument('--skeleton_config', type=str, required=False)
-    parser.add_argument('--skin_config', type=str, required=False)
-    parser.add_argument('--merge_dir', type=str, required=False)
-    parser.add_argument('--merge_name', type=str, required=False)
-    parser.add_argument('--add_root', type=str2bool, required=False, default=False)
-    parser.add_argument('--source', type=nullable_string, required=False, default=None)
-    parser.add_argument('--target', type=nullable_string, required=False, default=None)
-    parser.add_argument('--output', type=nullable_string, required=False, default=None)
+    parser.add_argument("--require_suffix", type=str, required=True)
+    parser.add_argument("--num_runs", type=int, required=True)
+    parser.add_argument("--id", type=int, required=True)
+    parser.add_argument("--data_config", type=str, required=False)
+    parser.add_argument("--skeleton_config", type=str, required=False)
+    parser.add_argument("--skin_config", type=str, required=False)
+    parser.add_argument("--merge_dir", type=str, required=False)
+    parser.add_argument("--merge_name", type=str, required=False)
+    parser.add_argument("--add_root", type=str2bool, required=False, default=False)
+    parser.add_argument("--source", type=nullable_string, required=False, default=None)
+    parser.add_argument("--target", type=nullable_string, required=False, default=None)
+    parser.add_argument("--output", type=nullable_string, required=False, default=None)
     return parser.parse_args()
 
-def transfer(source: str, target: str, output: str, add_root: bool=False):
+
+def transfer(source: str, target: str, output: str, add_root: bool = False):
     clean_bpy()
     try:
         armature = load(filepath=source, return_armature=True)
@@ -453,33 +460,34 @@ def transfer(source: str, target: str, output: str, add_root: bool=False):
         add_root=add_root,
     )
 
+
 if __name__ == "__main__":
     args = parse()
-    
+
     if args.source is not None or args.target is not None:
         assert args.source is not None and args.target is not None
         transfer(args.source, args.target, args.output, args.add_root)
         exit()
 
-    data_config     = Box(yaml.safe_load(open(args.data_config, "r")))
+    data_config = Box(yaml.safe_load(open(args.data_config, "r")))
     skeleton_config = Box(yaml.safe_load(open(args.skeleton_config, "r")))
-    skin_config     = Box(yaml.safe_load(open(args.skin_config, "r")))
+    skin_config = Box(yaml.safe_load(open(args.skin_config, "r")))
 
-    num_runs        = args.num_runs
-    id              = args.id
-    require_suffix  = args.require_suffix.split(',')
-    merge_dir       = args.merge_dir
-    merge_name      = args.merge_name
-    add_root        = args.add_root
+    num_runs = args.num_runs
+    id = args.id
+    require_suffix = args.require_suffix.split(",")
+    merge_dir = args.merge_dir
+    merge_name = args.merge_name
+    add_root = args.add_root
 
-    input_dataset_dir   = data_config.input_dataset_dir
-    dataset_name        = data_config.output_dataset_dir
-    
+    input_dataset_dir = data_config.input_dataset_dir
+    dataset_name = data_config.output_dataset_dir
+
     skin_output_dataset_dir = skin_config.writer.output_dir
-    skin_name               = skin_config.writer.export_npz
-    
+    skin_name = skin_config.writer.export_npz
+
     skeleton_output_dataset_dir = skeleton_config.writer.output_dir
-    skeleton_name               = skeleton_config.writer.export_npz
+    skeleton_name = skeleton_config.writer.export_npz
 
     def make_path(output_dataset_dir, dataset_name, root, file_name):
         if output_dataset_dir is None:
@@ -498,16 +506,18 @@ if __name__ == "__main__":
     files = []
     for root, dirs, f in os.walk(input_dataset_dir):
         for file in f:
-            if file.split('.')[-1] in require_suffix:
+            if file.split(".")[-1] in require_suffix:
                 file_name = file.removeprefix("./")
-                suffix = file.split('.')[-1]
+                suffix = file.split(".")[-1]
                 # remove suffix
-                file_name = '.'.join(file_name.split('.')[:-1])
-                
-                skin_path = make_path(skin_output_dataset_dir, dataset_name, root, os.path.join(file_name, skin_name+'.npz'))
-                skeleton_path = make_path(skeleton_output_dataset_dir, dataset_name, root, os.path.join(file_name, skeleton_name+'.npz'))
-                merge_path = make_path(merge_dir, dataset_name, root, os.path.join(file_name, merge_name+"."+suffix))
-                
+                file_name = ".".join(file_name.split(".")[:-1])
+
+                skin_path = make_path(skin_output_dataset_dir, dataset_name, root, os.path.join(file_name, skin_name + ".npz"))
+                skeleton_path = make_path(
+                    skeleton_output_dataset_dir, dataset_name, root, os.path.join(file_name, skeleton_name + ".npz")
+                )
+                merge_path = make_path(merge_dir, dataset_name, root, os.path.join(file_name, merge_name + "." + suffix))
+
                 # check if inference result exists
                 if os.path.exists(skin_path) and os.path.exists(skeleton_path):
                     files.append((os.path.join(root, file), skin_path, skeleton_path, merge_path))
@@ -517,11 +527,11 @@ if __name__ == "__main__":
     gap = num_files // num_runs
     start = gap * id
     end = gap * (id + 1)
-    if id+1==num_runs:
+    if id + 1 == num_runs:
         end = num_files
-    
+
     files = sorted(files)
-    if end!=-1:
+    if end != -1:
         files = files[:end]
     tot = 0
     for file in tqdm(files[start:]):
@@ -529,10 +539,10 @@ if __name__ == "__main__":
         skin_path = file[1]
         skeleton_path = file[2]
         merge_file = file[3]
-        
+
         raw_skin = RawSkin.load(path=skin_path)
         raw_data = RawData.load(path=skeleton_path)
-        
+
         try:
             merge(
                 path=origin_file,
@@ -544,7 +554,7 @@ if __name__ == "__main__":
                 names=raw_data.names,
                 tails=raw_data.tails,
                 add_root=add_root,
-                is_vrm=(raw_data.cls=='vroid'),
+                is_vrm=(raw_data.cls == "vroid"),
             )
         except Exception as e:
             print(f"failed to merge {origin_file}: {e}")

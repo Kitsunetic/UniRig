@@ -1,13 +1,12 @@
-import os
-import sys
 import argparse
 import multiprocessing as mp
-from torch.nn.parallel import DistributedDataParallel
-
+import os
+import sys
 
 import pointcept.utils.comm as comm
-from pointcept.utils.env import get_random_seed, set_seed
 from pointcept.utils.config import Config, DictAction
+from pointcept.utils.env import get_random_seed, set_seed
+from torch.nn.parallel import DistributedDataParallel
 
 
 def create_ddp_model(model, *, fp16_compression=False, **kwargs):
@@ -65,15 +64,9 @@ def default_argument_parser(epilog=None):
     """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument(
-        "--config-file", default="", metavar="FILE", help="path to config file"
-    )
-    parser.add_argument(
-        "--num-gpus", type=int, default=1, help="number of gpus *per machine*"
-    )
-    parser.add_argument(
-        "--num-machines", type=int, default=1, help="total number of machines"
-    )
+    parser.add_argument("--config-file", default="", metavar="FILE", help="path to config file")
+    parser.add_argument("--num-gpus", type=int, default=1, help="number of gpus *per machine*")
+    parser.add_argument("--num-machines", type=int, default=1, help="total number of machines")
     parser.add_argument(
         "--machine-rank",
         type=int,
@@ -91,9 +84,7 @@ def default_argument_parser(epilog=None):
         help="initialization URL for pytorch distributed backend. See "
         "https://pytorch.org/docs/stable/distributed.html for details.",
     )
-    parser.add_argument(
-        "--options", nargs="+", action=DictAction, help="custom options"
-    )
+    parser.add_argument("--options", nargs="+", action=DictAction, help="custom options")
     return parser
 
 
@@ -128,12 +119,8 @@ def default_setup(cfg):
     assert cfg.batch_size_val is None or cfg.batch_size_val % world_size == 0
     assert cfg.batch_size_test is None or cfg.batch_size_test % world_size == 0
     cfg.batch_size_per_gpu = cfg.batch_size // world_size
-    cfg.batch_size_val_per_gpu = (
-        cfg.batch_size_val // world_size if cfg.batch_size_val is not None else 1
-    )
-    cfg.batch_size_test_per_gpu = (
-        cfg.batch_size_test // world_size if cfg.batch_size_test is not None else 1
-    )
+    cfg.batch_size_val_per_gpu = cfg.batch_size_val // world_size if cfg.batch_size_val is not None else 1
+    cfg.batch_size_test_per_gpu = cfg.batch_size_test // world_size if cfg.batch_size_test is not None else 1
     # update data loop
     assert cfg.epoch % cfg.eval_epoch == 0
     # settle random seed

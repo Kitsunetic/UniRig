@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # This file is part of UniRig.
-# 
+#
 # This file is derived from https://github.com/NeuralCarver/Michelangelo
 #
 # Copyright (c) https://github.com/NeuralCarver/Michelangelo original authors
@@ -21,18 +21,21 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import math
+import os
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional
-import os
 
 from .checkpoint import checkpoint
+
 
 def init_linear(l, stddev):
     nn.init.normal_(l.weight, std=stddev)
     if l.bias is not None:
         nn.init.constant_(l.bias, 0.0)
+
 
 def flash_attention(q, k, v):
     with torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=True, enable_mem_efficient=False):
@@ -41,9 +44,10 @@ def flash_attention(q, k, v):
         v = v.transpose(1, 2)
         out = F.scaled_dot_product_attention(q, k, v)
         out = out.transpose(1, 2)
-        # print("use flash atten 2")   
+        # print("use flash atten 2")
 
     return out
+
 
 class MultiheadAttention(nn.Module):
     def __init__(
@@ -56,7 +60,7 @@ class MultiheadAttention(nn.Module):
         heads: int,
         init_scale: float,
         qkv_bias: bool,
-        flash: bool = False
+        flash: bool = False,
     ):
         super().__init__()
         self.n_ctx = n_ctx
@@ -95,9 +99,7 @@ class QKVMultiheadAttention(nn.Module):
             out = flash_attention(q, k, v)
             out = out.reshape(out.shape[0], out.shape[1], -1)
         else:
-            weight = torch.einsum(
-                "bthc,bshc->bhts", q * scale, k * scale
-            )  # More stable with f16 than dividing afterwards
+            weight = torch.einsum("bthc,bshc->bhts", q * scale, k * scale)  # More stable with f16 than dividing afterwards
             wdtype = weight.dtype
             weight = torch.softmax(weight.float(), dim=-1).type(wdtype)
             out = torch.einsum("bhts,bshc->bthc", weight, v).reshape(bs, n_ctx, -1)
@@ -117,7 +119,7 @@ class ResidualAttentionBlock(nn.Module):
         init_scale: float = 1.0,
         qkv_bias: bool = True,
         flash: bool = False,
-        use_checkpoint: bool = False
+        use_checkpoint: bool = False,
     ):
         super().__init__()
 
@@ -131,7 +133,7 @@ class ResidualAttentionBlock(nn.Module):
             heads=heads,
             init_scale=init_scale,
             qkv_bias=qkv_bias,
-            flash=flash
+            flash=flash,
         )
         self.ln_1 = nn.LayerNorm(width, device=device, dtype=dtype)
         self.mlp = MLP(device=device, dtype=dtype, width=width, init_scale=init_scale)
@@ -168,9 +170,7 @@ class MultiheadCrossAttention(nn.Module):
         self.c_q = nn.Linear(width, width, bias=qkv_bias, device=device, dtype=dtype)
         self.c_kv = nn.Linear(self.data_width, width * 2, bias=qkv_bias, device=device, dtype=dtype)
         self.c_proj = nn.Linear(width, width, device=device, dtype=dtype)
-        self.attention = QKVMultiheadCrossAttention(
-            device=device, dtype=dtype, heads=heads, n_data=n_data, flash=flash
-        )
+        self.attention = QKVMultiheadCrossAttention(device=device, dtype=dtype, heads=heads, n_data=n_data, flash=flash)
         init_linear(self.c_q, init_scale)
         init_linear(self.c_kv, init_scale)
         init_linear(self.c_proj, init_scale)
@@ -184,8 +184,9 @@ class MultiheadCrossAttention(nn.Module):
 
 
 class QKVMultiheadCrossAttention(nn.Module):
-    def __init__(self, *, device: torch.device, dtype: torch.dtype, heads: int,
-                 flash: bool = False, n_data: Optional[int] = None):
+    def __init__(
+        self, *, device: torch.device, dtype: torch.dtype, heads: int, flash: bool = False, n_data: Optional[int] = None
+    ):
 
         super().__init__()
         self.device = device
@@ -207,9 +208,7 @@ class QKVMultiheadCrossAttention(nn.Module):
             out = flash_attention(q, k, v)
             out = out.reshape(out.shape[0], out.shape[1], -1)
         else:
-            weight = torch.einsum(
-                "bthc,bshc->bhts", q * scale, k * scale
-            )  # More stable with f16 than dividing afterwards
+            weight = torch.einsum("bthc,bshc->bhts", q * scale, k * scale)  # More stable with f16 than dividing afterwards
             wdtype = weight.dtype
             weight = torch.softmax(weight.float(), dim=-1).type(wdtype)
             out = torch.einsum("bhts,bshc->bthc", weight, v).reshape(bs, n_ctx, -1)
@@ -230,7 +229,7 @@ class ResidualCrossAttentionBlock(nn.Module):
         mlp_width_scale: int = 4,
         init_scale: float = 0.25,
         qkv_bias: bool = True,
-        flash: bool = False
+        flash: bool = False,
     ):
         super().__init__()
 
@@ -260,12 +259,15 @@ class ResidualCrossAttentionBlock(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, *,
-                 device: Optional[torch.device],
-                 dtype: Optional[torch.dtype],
-                 width: int,
-                 hidden_width_scale: int = 4,
-                 init_scale: float):
+    def __init__(
+        self,
+        *,
+        device: Optional[torch.device],
+        dtype: Optional[torch.dtype],
+        width: int,
+        hidden_width_scale: int = 4,
+        init_scale: float,
+    ):
         super().__init__()
         self.width = width
         self.c_fc = nn.Linear(width, width * hidden_width_scale, device=device, dtype=dtype)
@@ -291,7 +293,7 @@ class Transformer(nn.Module):
         init_scale: float = 0.25,
         qkv_bias: bool = True,
         flash: bool = False,
-        use_checkpoint: bool = False
+        use_checkpoint: bool = False,
     ):
         super().__init__()
         self.n_ctx = n_ctx
@@ -308,7 +310,7 @@ class Transformer(nn.Module):
                     init_scale=init_scale,
                     qkv_bias=qkv_bias,
                     flash=flash,
-                    use_checkpoint=use_checkpoint
+                    use_checkpoint=use_checkpoint,
                 )
                 for _ in range(layers)
             ]

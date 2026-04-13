@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # This file is part of UniRig.
-# 
+#
 # This file is derived from https://github.com/NeuralCarver/Michelangelo
 #
 # Copyright (c) https://github.com/NeuralCarver/Michelangelo original authors
@@ -23,8 +23,9 @@
 Adapted from: https://github.com/openai/guided-diffusion/blob/22e0df8183507e13a7813f8d38d51b072ca1e67c/guided_diffusion/nn.py#L124
 """
 
-import torch
 from typing import Callable, Iterable, Sequence, Union
+
+import torch
 from packaging import version
 
 
@@ -33,7 +34,7 @@ def checkpoint(
     inputs: Sequence[torch.Tensor],
     params: Iterable[torch.Tensor],
     flag: bool,
-    use_deepspeed: bool = False
+    use_deepspeed: bool = False,
 ):
     """
     Evaluate a function without caching intermediate activations, allowing for
@@ -48,6 +49,7 @@ def checkpoint(
     if flag:
         if use_deepspeed:
             import deepspeed
+
             return deepspeed.checkpointing.checkpoint(func, *inputs)
 
         args = tuple(inputs) + tuple(params)
@@ -59,18 +61,20 @@ def checkpoint(
 class CheckpointFunction(torch.autograd.Function):
     @staticmethod
     def _get_fwd_decorator():
-        if version.parse(torch.__version__) >= version.parse('2.5.0'):
-            return torch.amp.custom_fwd(device_type='cuda')
+        if version.parse(torch.__version__) >= version.parse("2.5.0"):
+            return torch.amp.custom_fwd(device_type="cuda")
         else:
             return torch.cuda.amp.custom_fwd()
 
     @staticmethod
     def _get_bwd_decorator():
-        if version.parse(torch.__version__) >= version.parse('2.5.0'):
-            return torch.amp.custom_bwd(device_type='cuda')
+        if version.parse(torch.__version__) >= version.parse("2.5.0"):
+            return torch.amp.custom_bwd(device_type="cuda")
         else:
+
             def custom_bwd(bwd):
                 return torch.cuda.amp.custom_bwd(bwd=bwd)
+
             return custom_bwd
 
     @staticmethod

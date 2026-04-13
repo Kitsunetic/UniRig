@@ -1,25 +1,27 @@
-import sys
 import glob
 import os
 import shutil
+import sys
 import time
+from collections import OrderedDict
+
 import torch
 import torch.utils.data
-from collections import OrderedDict
 
 if sys.version_info >= (3, 10):
     from collections.abc import Sequence
 else:
     from collections import Sequence
-from pointcept.utils.timer import Timer
-from pointcept.utils.comm import is_main_process, synchronize, get_world_size
-from pointcept.utils.cache import shared_dict
 
 import pointcept.utils.comm as comm
-# from pointcept.engines.test import TESTERS
+from pointcept.utils.cache import shared_dict
+from pointcept.utils.comm import get_world_size, is_main_process, synchronize
+from pointcept.utils.timer import Timer
 
-from .default import HookBase
 from .builder import HOOKS
+from .default import HookBase
+
+# from pointcept.engines.test import TESTERS
 
 
 @HOOKS.register_module()
@@ -123,9 +125,7 @@ class InformationWriter(HookBase):
     def after_epoch(self):
         epoch_info = "Train result: "
         for key in self.model_output_keys:
-            epoch_info += "{key}: {value:.4f} ".format(
-                key=key, value=self.trainer.storage.history(key).avg
-            )
+            epoch_info += "{key}: {value:.4f} ".format(key=key, value=self.trainer.storage.history(key).avg)
         self.trainer.logger.info(epoch_info)
         if self.trainer.writer is not None:
             for key in self.model_output_keys:
@@ -151,19 +151,13 @@ class CheckpointSaver(HookBase):
                     self.trainer.best_metric_value = current_metric_value
                     is_best = True
                     self.trainer.logger.info(
-                        "Best validation {} updated to: {:.4f}".format(
-                            current_metric_name, current_metric_value
-                        )
+                        "Best validation {} updated to: {:.4f}".format(current_metric_name, current_metric_value)
                     )
                 self.trainer.logger.info(
-                    "Currently Best {}: {:.4f}".format(
-                        current_metric_name, self.trainer.best_metric_value
-                    )
+                    "Currently Best {}: {:.4f}".format(current_metric_name, self.trainer.best_metric_value)
                 )
 
-            filename = os.path.join(
-                self.trainer.cfg.save_path, "model", "model_last.pth"
-            )
+            filename = os.path.join(self.trainer.cfg.save_path, "model", "model_last.pth")
             self.trainer.logger.info("Saving checkpoint to: " + filename)
             torch.save(
                 {
@@ -171,9 +165,7 @@ class CheckpointSaver(HookBase):
                     "state_dict": self.trainer.model.state_dict(),
                     "optimizer": self.trainer.optimizer.state_dict(),
                     "scheduler": self.trainer.scheduler.state_dict(),
-                    "scaler": self.trainer.scaler.state_dict()
-                    if self.trainer.cfg.enable_amp
-                    else None,
+                    "scaler": self.trainer.scaler.state_dict() if self.trainer.cfg.enable_amp else None,
                     "best_metric_value": self.trainer.best_metric_value,
                 },
                 filename + ".tmp",
@@ -211,8 +203,7 @@ class CheckpointLoader(HookBase):
                 map_location=lambda storage, loc: storage.cuda(),
             )
             self.trainer.logger.info(
-                f"Loading layer weights with keyword: {self.keywords}, "
-                f"replace keyword with: {self.replacement}"
+                f"Loading layer weights with keyword: {self.keywords}, " f"replace keyword with: {self.replacement}"
             )
             weight = OrderedDict()
             for key, value in checkpoint["state_dict"].items():
@@ -225,14 +216,10 @@ class CheckpointLoader(HookBase):
                 if comm.get_world_size() == 1:
                     key = key[7:]  # module.xxx.xxx -> xxx.xxx
                 weight[key] = value
-            load_state_info = self.trainer.model.load_state_dict(
-                weight, strict=self.strict
-            )
+            load_state_info = self.trainer.model.load_state_dict(weight, strict=self.strict)
             self.trainer.logger.info(f"Missing keys: {load_state_info[0]}")
             if self.trainer.cfg.resume:
-                self.trainer.logger.info(
-                    f"Resuming train at eval epoch: {checkpoint['epoch']}"
-                )
+                self.trainer.logger.info(f"Resuming train at eval epoch: {checkpoint['epoch']}")
                 self.trainer.start_epoch = checkpoint["epoch"]
                 self.trainer.best_metric_value = checkpoint["best_metric_value"]
                 self.trainer.optimizer.load_state_dict(checkpoint["optimizer"])
@@ -266,9 +253,7 @@ class DataCacheOperator(HookBase):
         return "pointcept" + data_name.replace(os.path.sep, "-")
 
     def before_train(self):
-        self.trainer.logger.info(
-            f"=> Caching dataset: {self.data_root}, split: {self.split} ..."
-        )
+        self.trainer.logger.info(f"=> Caching dataset: {self.data_root}, split: {self.split} ...")
         if is_main_process():
             for data_path in self.data_list:
                 cache_name = self.get_cache_name(data_path)
@@ -297,7 +282,7 @@ class RuntimeProfiler(HookBase):
 
     def before_train(self):
         self.trainer.logger.info("Profiling runtime ...")
-        from torch.profiler import profile, record_function, ProfilerActivity
+        from torch.profiler import ProfilerActivity, profile, record_function
 
         for i, input_dict in enumerate(self.trainer.train_loader):
             if i == self.warm_up + 1:
@@ -329,29 +314,15 @@ class RuntimeProfiler(HookBase):
             self.trainer.logger.info(f"Profile: [{i + 1}/{self.warm_up + 1}]")
         if self.forward:
             self.trainer.logger.info(
-                "Forward profile: \n"
-                + str(
-                    forward_prof.key_averages().table(
-                        sort_by=self.sort_by, row_limit=self.row_limit
-                    )
-                )
+                "Forward profile: \n" + str(forward_prof.key_averages().table(sort_by=self.sort_by, row_limit=self.row_limit))
             )
-            forward_prof.export_chrome_trace(
-                os.path.join(self.trainer.cfg.save_path, "forward_trace.json")
-            )
+            forward_prof.export_chrome_trace(os.path.join(self.trainer.cfg.save_path, "forward_trace.json"))
 
         if self.backward:
             self.trainer.logger.info(
-                "Backward profile: \n"
-                + str(
-                    backward_prof.key_averages().table(
-                        sort_by=self.sort_by, row_limit=self.row_limit
-                    )
-                )
+                "Backward profile: \n" + str(backward_prof.key_averages().table(sort_by=self.sort_by, row_limit=self.row_limit))
             )
-            backward_prof.export_chrome_trace(
-                os.path.join(self.trainer.cfg.save_path, "backward_trace.json")
-            )
+            backward_prof.export_chrome_trace(os.path.join(self.trainer.cfg.save_path, "backward_trace.json"))
         if self.interrupt:
             sys.exit(0)
 
@@ -378,13 +349,7 @@ class RuntimeProfilerV2(HookBase):
 
     def before_train(self):
         self.trainer.logger.info("Profiling runtime ...")
-        from torch.profiler import (
-            profile,
-            record_function,
-            ProfilerActivity,
-            schedule,
-            tensorboard_trace_handler,
-        )
+        from torch.profiler import ProfilerActivity, profile, record_function, schedule, tensorboard_trace_handler
 
         prof = profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -412,17 +377,8 @@ class RuntimeProfilerV2(HookBase):
             with record_function("model_backward"):
                 loss.backward()
             prof.step()
-            self.trainer.logger.info(
-                f"Profile: [{i + 1}/{(self.wait + self.warmup + self.active) * self.repeat}]"
-            )
-        self.trainer.logger.info(
-            "Profile: \n"
-            + str(
-                prof.key_averages().table(
-                    sort_by=self.sort_by, row_limit=self.row_limit
-                )
-            )
-        )
+            self.trainer.logger.info(f"Profile: [{i + 1}/{(self.wait + self.warmup + self.active) * self.repeat}]")
+        self.trainer.logger.info("Profile: \n" + str(prof.key_averages().table(sort_by=self.sort_by, row_limit=self.row_limit)))
         prof.stop()
 
         if self.interrupt:

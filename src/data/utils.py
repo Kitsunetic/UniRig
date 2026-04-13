@@ -1,12 +1,12 @@
-import torch
-import numpy as np
-from numpy import ndarray
-from torch import Tensor, FloatTensor
 from typing import Tuple, Union
 
-from scipy.spatial.transform import Rotation as R
-from scipy.sparse import csc_matrix
 import numpy as np
+import torch
+from numpy import ndarray
+from scipy.sparse import csc_matrix
+from scipy.spatial.transform import Rotation as R
+from torch import FloatTensor, Tensor
+
 
 def quaternion_to_matrix(x, use_4x4=True) -> FloatTensor:
     """
@@ -19,7 +19,7 @@ def quaternion_to_matrix(x, use_4x4=True) -> FloatTensor:
     r, i, j, k = torch.unbind(quaternions, -1)
     two_s = 2.0 / (quaternions * quaternions).sum(-1)
     device = quaternions.device
-    
+
     if use_4x4:
         o = torch.stack(
             (
@@ -60,6 +60,7 @@ def quaternion_to_matrix(x, use_4x4=True) -> FloatTensor:
         )
         return o.reshape(quaternions.shape[:-1] + (3, 3))
 
+
 def axis_angle_to_quaternion(axis_angle: FloatTensor) -> FloatTensor:
     """
     Ref: https://pytorch3d.readthedocs.io/en/latest/_modules/pytorch3d/transforms/rotation_conversions.html#axis_angle_to_quaternion
@@ -69,18 +70,13 @@ def axis_angle_to_quaternion(axis_angle: FloatTensor) -> FloatTensor:
     eps = 1e-6
     small_angles = angles.abs() < eps
     sin_half_angles_over_angles = torch.empty_like(angles)
-    sin_half_angles_over_angles[~small_angles] = (
-        torch.sin(half_angles[~small_angles]) / angles[~small_angles]
-    )
+    sin_half_angles_over_angles[~small_angles] = torch.sin(half_angles[~small_angles]) / angles[~small_angles]
     # for x small, sin(x/2) is about x/2 - (x/2)^3/6
     # so sin(x/2)/x is about 1/2 - (x*x)/48
-    sin_half_angles_over_angles[small_angles] = (
-        0.5 - (angles[small_angles] * angles[small_angles]) / 48
-    )
-    quaternions = torch.cat(
-        [torch.cos(half_angles), axis_angle * sin_half_angles_over_angles], dim=-1
-    )
+    sin_half_angles_over_angles[small_angles] = 0.5 - (angles[small_angles] * angles[small_angles]) / 48
+    quaternions = torch.cat([torch.cos(half_angles), axis_angle * sin_half_angles_over_angles], dim=-1)
     return quaternions
+
 
 def axis_angle_to_matrix(axis_angle: Union[FloatTensor, ndarray]) -> Union[FloatTensor, ndarray]:
     """
@@ -89,10 +85,16 @@ def axis_angle_to_matrix(axis_angle: Union[FloatTensor, ndarray]) -> Union[Float
     if isinstance(axis_angle, FloatTensor):
         return quaternion_to_matrix(axis_angle_to_quaternion(axis_angle))
     else:
-        res = np.pad(R.from_rotvec(axis_angle).as_matrix(), ((0, 0), (0, 1), (0, 1)), 'constant', constant_values=((0, 0), (0, 0), (0, 0)))
+        res = np.pad(
+            R.from_rotvec(axis_angle).as_matrix(),
+            ((0, 0), (0, 1), (0, 1)),
+            "constant",
+            constant_values=((0, 0), (0, 0), (0, 0)),
+        )
         assert res.ndim == 3
         res[:, -1, -1] = 1
         return res
+
 
 def _sqrt_positive_part(x: torch.Tensor) -> torch.Tensor:
     """
@@ -106,6 +108,7 @@ def _sqrt_positive_part(x: torch.Tensor) -> torch.Tensor:
     else:
         ret = torch.where(positive_mask, torch.sqrt(x), ret)
     return ret
+
 
 def standardize_quaternion(quaternions: torch.Tensor) -> torch.Tensor:
     """
@@ -121,6 +124,7 @@ def standardize_quaternion(quaternions: torch.Tensor) -> torch.Tensor:
     """
     return torch.where(quaternions[..., 0:1] < 0, -quaternions, quaternions)
 
+
 def matrix_to_quaternion(matrix: torch.Tensor) -> torch.Tensor:
     """
     Convert rotations given as rotation matrices to quaternions.
@@ -135,9 +139,7 @@ def matrix_to_quaternion(matrix: torch.Tensor) -> torch.Tensor:
         raise ValueError(f"Invalid rotation matrix shape {matrix.shape}.")
 
     batch_dim = matrix.shape[:-2]
-    m00, m01, m02, m10, m11, m12, m20, m21, m22 = torch.unbind(
-        matrix.reshape(batch_dim + (9,)), dim=-1
-    )
+    m00, m01, m02, m10, m11, m12, m20, m21, m22 = torch.unbind(matrix.reshape(batch_dim + (9,)), dim=-1)
 
     q_abs = _sqrt_positive_part(
         torch.stack(
@@ -177,20 +179,19 @@ def matrix_to_quaternion(matrix: torch.Tensor) -> torch.Tensor:
 
     # if not for numerical problems, quat_candidates[i] should be same (up to a sign),
     # forall i; we pick the best-conditioned one (with the largest denominator)
-    out = quat_candidates[
-        torch.nn.functional.one_hot(q_abs.argmax(dim=-1), num_classes=4) > 0.5, :
-    ].reshape(batch_dim + (4,))
+    out = quat_candidates[torch.nn.functional.one_hot(q_abs.argmax(dim=-1), num_classes=4) > 0.5, :].reshape(batch_dim + (4,))
     return standardize_quaternion(out)
+
 
 def linear_blend_skinning(
     vertex: Union[FloatTensor, ndarray],
     matrix_local: Union[FloatTensor, ndarray],
     matrix: Union[FloatTensor, ndarray],
     skin: Union[FloatTensor, ndarray],
-    pad: int=0,
-    value: float=0.,
+    pad: int = 0,
+    value: float = 0.0,
 ) -> Union[FloatTensor, ndarray]:
-    '''
+    """
     Args:
         vertex: (B, N, 4-pad) or (N, 4-pad)
         matrix_local: (B, J, 4, 4) or (J, 4, 4)
@@ -198,7 +199,7 @@ def linear_blend_skinning(
         skin: (B, N, J) or (N, J), value of pseudo bones should be 0
     Returns:
         (B, N, 3) or (N, 3)
-    '''
+    """
     assert vertex.shape[-1] + pad == 4
     if isinstance(vertex, Tensor):
         dims = vertex.dim()
@@ -210,10 +211,9 @@ def linear_blend_skinning(
         assert isinstance(vertex, Tensor)
         J = matrix_local.shape[1]
         # (B, J, 3+pad, N)
-        offset = (
-            matrix_local.inverse() @
-            torch.nn.functional.pad(vertex, (0, pad, 0, 0, 0, 0), value=value).unsqueeze(1).transpose(2, 3).repeat(1, J, 1, 1)
-        )
+        offset = matrix_local.inverse() @ torch.nn.functional.pad(vertex, (0, pad, 0, 0, 0, 0), value=value).unsqueeze(
+            1
+        ).transpose(2, 3).repeat(1, J, 1, 1)
         # (B, J, 4, N)
         per_bone_matrix = matrix @ offset
         # (B, J, 4, N)
@@ -223,14 +223,13 @@ def linear_blend_skinning(
         # (B, 3, N)
         final = g[:, 0:3, :] / (skin.transpose(1, 2).sum(dim=1) + 1e-8).unsqueeze(1)
         return final.permute(0, 2, 1)
-    
+
     elif dims == 2:  # Case: (N, 3+pad)
         if isinstance(vertex, Tensor):
             J = matrix_local.shape[0]
-            offset = (
-                matrix_local.inverse() @
-                torch.nn.functional.pad(vertex, (0, pad, 0, 0), value=value).unsqueeze(0).transpose(1, 2).repeat(J, 1, 1)
-            )
+            offset = matrix_local.inverse() @ torch.nn.functional.pad(vertex, (0, pad, 0, 0), value=value).unsqueeze(
+                0
+            ).transpose(1, 2).repeat(J, 1, 1)
             per_bone_matrix = matrix @ offset
             weighted_per_bone_matrix = skin.transpose(0, 1).unsqueeze(1) * per_bone_matrix
             g = weighted_per_bone_matrix.sum(dim=0)
@@ -240,7 +239,7 @@ def linear_blend_skinning(
             J = matrix_local.shape[0]
             N = vertex.shape[0]
             # (4, N)
-            padded = np.pad(vertex, ((0, 0), (0, pad)), 'constant', constant_values=(0, value)).T
+            padded = np.pad(vertex, ((0, 0), (0, pad)), "constant", constant_values=(0, value)).T
             # (J, 4, 4)
             trans = matrix @ np.linalg.inv(matrix_local)
             weighted_per_bone_matrix = []
@@ -255,4 +254,4 @@ def linear_blend_skinning(
             final = g[:3, :] / (np.sum(skin, axis=1) + 1e-8)
             return final.T
     else:
-        assert 0, f'unsupported shape: {vertex.shape}'
+        assert 0, f"unsupported shape: {vertex.shape}"

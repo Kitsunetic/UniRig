@@ -1,24 +1,26 @@
 import os
-os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
-from os.path import join
+
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 import glob
+import json
+from collections.abc import Sequence
+from copy import deepcopy
+from os.path import join
+
+import cv2
 import numpy as np
+import pointops
 import torch
 import trimesh
-import json
-import cv2
-import pointops
-from copy import deepcopy
-from torch.utils.data import Dataset
-from collections.abc import Sequence
-from transformers import pipeline, SamModel
 from PIL import Image
-
-from pointcept.utils.logger import get_root_logger
 from pointcept.utils.cache import shared_dict
+from pointcept.utils.logger import get_root_logger
+from torch.utils.data import Dataset
+from transformers import SamModel, pipeline
+
 from .builder import DATASETS
-from .transform import Compose, TRANSFORMS
 from .sampart3d_util import *
+from .transform import TRANSFORMS, Compose
 
 
 @DATASETS.register_module()
@@ -37,7 +39,7 @@ class SAMPart3DDataset16Views(Dataset):
         batch_size=90,
         transform=None,
         loop=1,
-        extent_scale=10.0
+        extent_scale=10.0,
     ):
         super(SAMPart3DDataset16Views, self).__init__()
 
@@ -47,7 +49,7 @@ class SAMPart3DDataset16Views(Dataset):
         self.split = split
         self.pixels_per_image = pixels_per_image
         self.batch_size = batch_size
-        self.device = 'cuda'
+        self.device = "cuda"
         self.logger = get_root_logger()
 
         self.extent_scale = extent_scale
@@ -66,15 +68,11 @@ class SAMPart3DDataset16Views(Dataset):
 
             self.loop = loop
             self.data_list = self.get_data_list()
-            self.logger.info(
-                "Totally {} x {} samples in {} set.".format(
-                    len(self.data_list), self.loop, split
-                )
-            )
+            self.logger.info("Totally {} x {} samples in {} set.".format(len(self.data_list), self.loop, split))
 
     def sample_pixel(self, masks, image_height=512, image_width=512):
         masks = masks.to(self.device)
-        indices_batch = torch.zeros((self.batch_size*self.pixels_per_image, 3), device=self.device)
+        indices_batch = torch.zeros((self.batch_size * self.pixels_per_image, 3), device=self.device)
         random_imgs = torch.randint(0, len(masks), (self.batch_size,), device=self.device)
         for i in range(self.batch_size):
             # Find the indices of the valid points in the mask
@@ -87,13 +85,12 @@ class SAMPart3DDataset16Views(Dataset):
             else:
                 # Repeat the indices to fill up to pixels_per_image
                 repeat_times = self.pixels_per_image // len(valid_indices) + 1
-                indices = valid_indices.repeat(repeat_times, 1)[:self.pixels_per_image]
+                indices = valid_indices.repeat(repeat_times, 1)[: self.pixels_per_image]
 
             indices_batch[i * self.pixels_per_image : (i + 1) * self.pixels_per_image, 0] = random_imgs[i]
             indices_batch[i * self.pixels_per_image : (i + 1) * self.pixels_per_image, 1:] = indices
 
         return indices_batch
-
 
     def load_mesh(self, mesh_path, transform, sample_num=15000, pcd_path=None):
         mesh = trimesh.load(mesh_path)
@@ -108,10 +105,7 @@ class SAMPart3DDataset16Views(Dataset):
         mesh_center_offset = self.meta_data["mesh_offset"]
 
         object_org_coord = coord.copy()
-        rotation_matrix = np.array([
-            [1, 0, 0],
-            [0, 0, 1],
-            [0, -1, 0]])
+        rotation_matrix = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]])
         object_org_coord = np.dot(object_org_coord, rotation_matrix)
         object_org_coord = object_org_coord * mesh_scale + mesh_center_offset
 
@@ -124,8 +118,6 @@ class SAMPart3DDataset16Views(Dataset):
         # print("object_org_coord", torch.unique(self.object_org_coord, return_counts=True))
         del obj["origin_coord"], obj["face_index"], obj["inverse"]
         self.object = obj
-        
-            
 
     def prepare_meta_data(self, data_path=None):
         SAM_model = pipeline("mask-generation", model="facebook/sam-vit-huge", device=self.device)
@@ -138,7 +130,7 @@ class SAMPart3DDataset16Views(Dataset):
         object_org_coord = self.object_org_coord.to(self.device).contiguous().float()
         obj_offset = torch.tensor(object_org_coord.shape[0]).to(self.device)
 
-        camera_angle_x = self.meta_data['camera_angle_x']
+        camera_angle_x = self.meta_data["camera_angle_x"]
         for i, c2w_opengl in enumerate(self.meta_data["transforms"]):
             # print(frame['index'])
             c2w_opengl = np.array(c2w_opengl)
@@ -149,7 +141,7 @@ class SAMPart3DDataset16Views(Dataset):
                 mask_img = img[..., 3] == 0
                 img[mask_img] = [255, 255, 255, 255]
                 img = img[..., :3]
-                img = Image.fromarray(img.astype('uint8'))
+                img = Image.fromarray(img.astype("uint8"))
 
             # Calculate mapping
             depth_path = join(self.data_root, f"depth_{i:04d}.exr")
@@ -169,10 +161,10 @@ class SAMPart3DDataset16Views(Dataset):
             mapping[depth_valid] = indices.cpu().flatten()
             mapping_valid = mapping != -1
 
-            # Calculate groups 
+            # Calculate groups
             try:
                 masks = SAM_model(img, points_per_side=32, pred_iou_thresh=0.9, stability_score_thresh=0.9)
-                masks = masks['masks']
+                masks = masks["masks"]
                 masks = sorted(masks, key=lambda x: x.sum())
             except:
                 masks = []
@@ -187,7 +179,9 @@ class SAMPart3DDataset16Views(Dataset):
                     continue
                 else:
                     masks_filtered.append(mask)
-            pixel_level_keys, scale, mask_cdf = self._calculate_3d_groups(torch.from_numpy(depth), mapping_valid, masks_filtered, points_tensor[mask_dis])    
+            pixel_level_keys, scale, mask_cdf = self._calculate_3d_groups(
+                torch.from_numpy(depth), mapping_valid, masks_filtered, points_tensor[mask_dis]
+            )
 
             pixel_level_keys_list.append(pixel_level_keys)
             scale_list.append(scale)
@@ -196,9 +190,7 @@ class SAMPart3DDataset16Views(Dataset):
             mapping_list.append(mapping)
             mapping_valid_list.append(mapping_valid)
 
-        self.pixel_level_keys = torch.nested.nested_tensor(
-        pixel_level_keys_list
-        )
+        self.pixel_level_keys = torch.nested.nested_tensor(pixel_level_keys_list)
         self.scale_3d_statistics = torch.cat(scale_list)
         self.scale_3d = torch.nested.nested_tensor(scale_list)
         self.group_cdf = torch.nested.nested_tensor(group_cdf_list)
@@ -232,15 +224,10 @@ class SAMPart3DDataset16Views(Dataset):
             # Fail gracefully when no masks are found.
             # Create dummy data (all -1s), which will be ignored later.
             # See: `get_loss_dict_group` in `garfield_model.py`
-            pixel_level_keys = torch.full(
-                (image_shape[0], image_shape[1], 1), -1, dtype=torch.int
-            )
+            pixel_level_keys = torch.full((image_shape[0], image_shape[1], 1), -1, dtype=torch.int)
             scale = torch.Tensor([0.0]).view(-1, 1)
-            mask_cdf = torch.full(
-                (image_shape[0], image_shape[1], 1), 1, dtype=torch.float
-            )
+            mask_cdf = torch.full((image_shape[0], image_shape[1], 1), 1, dtype=torch.float)
             return (pixel_level_keys, scale, mask_cdf)
-
 
         # If no masks are found, return dummy data.
         if len(masks) == 0:
@@ -284,9 +271,7 @@ class SAMPart3DDataset16Views(Dataset):
 
         # Calculate "pixel level keys", which is a 2D array of shape (H, W, max_masks)
         # Each pixel has a list of group indices that it belongs to, in order of increasing scale.
-        pixel_level_keys = self.create_pixel_mask_array(
-            sam_mask
-        ).long()  # (H, W, max_masks)
+        pixel_level_keys = self.create_pixel_mask_array(sam_mask).long()  # (H, W, max_masks)
         depth_invalid = ~depth_valid
         pixel_level_keys[depth_invalid, :] = -1
 
@@ -298,27 +283,23 @@ class SAMPart3DDataset16Views(Dataset):
         probs = counts / counts.sum()  # [-1, 0, ...]
 
         pixel_shape = pixel_level_keys.shape
-        if (pixel_level_keys.max()+2) != probs.shape[0]:
+        if (pixel_level_keys.max() + 2) != probs.shape[0]:
             pixel_level_keys_new = pixel_level_keys.reshape(-1)
             unique_values, inverse_indices = torch.unique(pixel_level_keys_new, return_inverse=True)
             pixel_level_keys_new = inverse_indices.reshape(-1)
         else:
             pixel_level_keys_new = pixel_level_keys.reshape(-1) + 1
 
-        mask_probs = torch.gather(probs, 0, pixel_level_keys.reshape(-1) + 1).view(
-            pixel_shape
-        )
+        mask_probs = torch.gather(probs, 0, pixel_level_keys.reshape(-1) + 1).view(pixel_shape)
         mask_log_probs = torch.log(mask_probs)
         never_masked = mask_log_probs.isinf()
         mask_log_probs[never_masked] = 0.0
-        mask_log_probs = mask_log_probs / (
-            mask_log_probs.sum(dim=-1, keepdim=True) + 1e-6
-        )
+        mask_log_probs = mask_log_probs / (mask_log_probs.sum(dim=-1, keepdim=True) + 1e-6)
         mask_cdf = torch.cumsum(mask_log_probs, dim=-1)
         mask_cdf[never_masked] = 1.0
 
         return (pixel_level_keys.cpu(), scale.cpu(), mask_cdf.cpu())
-    
+
     @staticmethod
     def create_pixel_mask_array(masks: torch.Tensor):
         """
@@ -329,9 +310,7 @@ class SAMPart3DDataset16Views(Dataset):
         max_masks = masks.sum(dim=0).max().item()
         # print(max_masks)
         image_shape = masks.shape[1:]
-        pixel_mask_array = torch.full(
-            (max_masks, image_shape[0], image_shape[1]), -1, dtype=torch.int
-        ).to(masks.device)
+        pixel_mask_array = torch.full((max_masks, image_shape[0], image_shape[1]), -1, dtype=torch.int).to(masks.device)
 
         for m, mask in enumerate(masks):
             mask_clone = mask.clone()
@@ -372,12 +351,9 @@ class SAMPart3DDataset16Views(Dataset):
             mapping[i : i + npximg] = self.mapping[img_idx][x_ind[i : i + npximg], y_ind[i : i + npximg]]
 
             # Use `random_vec` to choose a group for each pixel.
-            per_pixel_index = self.pixel_level_keys[img_idx][
-                x_ind[i : i + npximg], y_ind[i : i + npximg]
-            ]
+            per_pixel_index = self.pixel_level_keys[img_idx][x_ind[i : i + npximg], y_ind[i : i + npximg]]
             random_index = torch.sum(
-                random_vec_sampling.view(-1, 1)
-                > self.group_cdf[img_idx][x_ind[i : i + npximg], y_ind[i : i + npximg]],
+                random_vec_sampling.view(-1, 1) > self.group_cdf[img_idx][x_ind[i : i + npximg], y_ind[i : i + npximg]],
                 dim=-1,
             )
 
@@ -387,9 +363,7 @@ class SAMPart3DDataset16Views(Dataset):
             if per_pixel_index.shape[-1] == 1:
                 per_pixel_mask = per_pixel_index.squeeze()
             else:
-                per_pixel_mask = torch.gather(
-                    per_pixel_index, 1, random_index.unsqueeze(-1)
-                ).squeeze()
+                per_pixel_mask = torch.gather(per_pixel_index, 1, random_index.unsqueeze(-1)).squeeze()
                 per_pixel_mask_ = torch.gather(
                     per_pixel_index,
                     1,
@@ -401,8 +375,7 @@ class SAMPart3DDataset16Views(Dataset):
             # interval scale supervision
             curr_scale = self.scale_3d[img_idx][per_pixel_mask]
             curr_scale[random_index == 0] = (
-                self.scale_3d[img_idx][per_pixel_mask][random_index == 0]
-                * random_vec_densify[random_index == 0]
+                self.scale_3d[img_idx][per_pixel_mask][random_index == 0] * random_vec_densify[random_index == 0]
             )
             for j in range(1, self.group_cdf[img_idx].shape[-1]):
                 if (random_index == j).sum() == 0:
@@ -416,7 +389,7 @@ class SAMPart3DDataset16Views(Dataset):
                     * random_vec_densify[random_index == j]
                 )
             scale[i : i + npximg] = curr_scale.squeeze().to(self.device)
-        
+
         batch = dict()
         batch["mask_id"] = mask_id
         batch["scale"] = scale

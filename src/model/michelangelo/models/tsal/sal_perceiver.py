@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # This file is part of UniRig.
-# 
+#
 # This file is derived from https://github.com/NeuralCarver/Michelangelo
 #
 # Copyright (c) https://github.com/NeuralCarver/Michelangelo original authors
@@ -20,46 +20,46 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import torch
-import torch.nn as nn
-from typing import Optional, Union
-from einops import repeat
 import math
-from torch_cluster import fps
 import random
 import time
+from typing import Optional, Union
+
 import numpy as np
+import torch
+import torch.nn as nn
+from einops import repeat
+from torch_cluster import fps
 
 from ..modules import checkpoint
 from ..modules.embedder import FourierEmbedder
-from ..modules.transformer_blocks import (
-    ResidualCrossAttentionBlock,
-    Transformer
-)
-
+from ..modules.transformer_blocks import ResidualCrossAttentionBlock, Transformer
 from .tsal_base import ShapeAsLatentModule
 
 
 class CrossAttentionEncoder(nn.Module):
 
-    def __init__(self, *,
-                 device: Optional[torch.device],
-                 dtype: Optional[torch.dtype],
-                 num_latents: int,
-                 fourier_embedder: FourierEmbedder,
-                 point_feats: int,
-                 width: int,
-                 heads: int,
-                 layers: int,
-                 init_scale: float = 0.25,
-                 qkv_bias: bool = True,
-                 flash: bool = False,
-                 use_ln_post: bool = False,
-                 use_checkpoint: bool = False,
-                 query_method: bool = False,
-                 use_full_input: bool = True,
-                 token_num: int = 256,
-                 no_query: bool=False):
+    def __init__(
+        self,
+        *,
+        device: Optional[torch.device],
+        dtype: Optional[torch.dtype],
+        num_latents: int,
+        fourier_embedder: FourierEmbedder,
+        point_feats: int,
+        width: int,
+        heads: int,
+        layers: int,
+        init_scale: float = 0.25,
+        qkv_bias: bool = True,
+        flash: bool = False,
+        use_ln_post: bool = False,
+        use_checkpoint: bool = False,
+        query_method: bool = False,
+        use_full_input: bool = True,
+        token_num: int = 256,
+        no_query: bool = False,
+    ):
 
         super().__init__()
 
@@ -97,7 +97,7 @@ class CrossAttentionEncoder(nn.Module):
             init_scale=init_scale,
             qkv_bias=qkv_bias,
             flash=flash,
-            use_checkpoint=False
+            use_checkpoint=False,
         )
 
         if use_ln_post:
@@ -117,13 +117,13 @@ class CrossAttentionEncoder(nn.Module):
         """
         if self.query_method:
             token_num = self.num_latents
-            bs = pc.shape[0] 
-            data = self.fourier_embedder(pc) 
-            if feats is not None: 
+            bs = pc.shape[0]
+            data = self.fourier_embedder(pc)
+            if feats is not None:
                 data = torch.cat([data, feats], dim=-1)
-            data = self.input_proj(data) 
+            data = self.input_proj(data)
 
-            query = repeat(self.query, "m c -> b m c", b=bs) 
+            query = repeat(self.query, "m c -> b m c", b=bs)
 
             latents = self.cross_attn(query, data)
             latents = self.self_attn(latents)
@@ -145,19 +145,18 @@ class CrossAttentionEncoder(nn.Module):
                 rng = np.random.default_rng(seed=0)
             ind = rng.choice(pc.shape[1], token_num * 4, replace=token_num * 4 > pc.shape[1])
 
-            pre_pc = pc[:,ind,:]
-            pre_feats = feats[:,ind,:]
+            pre_pc = pc[:, ind, :]
+            pre_feats = feats[:, ind, :]
 
-
-            B, N, D = pre_pc.shape           
+            B, N, D = pre_pc.shape
             C = pre_feats.shape[-1]
             ###### fps
-            pos = pre_pc.view(B*N, D)
-            pos_feats = pre_feats.view(B*N, C)
+            pos = pre_pc.view(B * N, D)
+            pos_feats = pre_feats.view(B * N, C)
             batch = torch.arange(B).to(pc.device)
             batch = torch.repeat_interleave(batch, N)
 
-            idx = fps(pos, batch, ratio=1. / 4, random_start=self.training)
+            idx = fps(pos, batch, ratio=1.0 / 4, random_start=self.training)
 
             sampled_pc = pos[idx]
             sampled_pc = sampled_pc.view(B, -1, 3)
@@ -167,22 +166,22 @@ class CrossAttentionEncoder(nn.Module):
 
             ######
             if self.use_full_input:
-                data = self.fourier_embedder(pc) 
+                data = self.fourier_embedder(pc)
             else:
-                data = self.fourier_embedder(pre_pc) 
+                data = self.fourier_embedder(pre_pc)
 
-            if feats is not None: 
+            if feats is not None:
                 if not self.use_full_input:
                     feats = pre_feats
-                data = torch.cat([data, feats], dim=-1) 
-            data = self.input_proj(data) 
+                data = torch.cat([data, feats], dim=-1)
+            data = self.input_proj(data)
 
-            sampled_data = self.fourier_embedder(sampled_pc) 
-            if feats is not None: 
-                sampled_data = torch.cat([sampled_data, sampled_feats], dim=-1) 
-            sampled_data = self.input_proj(sampled_data) 
+            sampled_data = self.fourier_embedder(sampled_pc)
+            if feats is not None:
+                sampled_data = torch.cat([sampled_data, sampled_feats], dim=-1)
+            sampled_data = self.input_proj(sampled_data)
 
-            latents = self.cross_attn(sampled_data, data) 
+            latents = self.cross_attn(sampled_data, data)
             latents = self.self_attn(latents)
 
             if self.ln_post is not None:
@@ -208,20 +207,23 @@ class CrossAttentionEncoder(nn.Module):
 
 class CrossAttentionDecoder(nn.Module):
 
-    def __init__(self, *,
-                 device: Optional[torch.device],
-                 dtype: Optional[torch.dtype],
-                 num_latents: int,
-                 out_channels: int,
-                 fourier_embedder: FourierEmbedder,
-                 width: int,
-                 heads: int,
-                 init_scale: float = 0.25,
-                 qkv_bias: bool = True,
-                 flash: bool = False,
-                 use_checkpoint: bool = False,
-                 mlp_width_scale: int = 4,
-                 supervision_type: str = 'occupancy'):
+    def __init__(
+        self,
+        *,
+        device: Optional[torch.device],
+        dtype: Optional[torch.dtype],
+        num_latents: int,
+        out_channels: int,
+        fourier_embedder: FourierEmbedder,
+        width: int,
+        heads: int,
+        init_scale: float = 0.25,
+        qkv_bias: bool = True,
+        flash: bool = False,
+        use_checkpoint: bool = False,
+        mlp_width_scale: int = 4,
+        supervision_type: str = "occupancy",
+    ):
 
         super().__init__()
 
@@ -245,10 +247,8 @@ class CrossAttentionDecoder(nn.Module):
 
         self.ln_post = nn.LayerNorm(width, device=device, dtype=dtype)
         self.output_proj = nn.Linear(width, out_channels, device=device, dtype=dtype)
-        if self.supervision_type == 'occupancy-sdf':
+        if self.supervision_type == "occupancy-sdf":
             self.output_proj_sdf = nn.Linear(width, out_channels, device=device, dtype=dtype)
-
-
 
     def _forward(self, queries: torch.FloatTensor, latents: torch.FloatTensor):
         if next(self.query_proj.parameters()).dtype == torch.float16:
@@ -260,7 +260,7 @@ class CrossAttentionDecoder(nn.Module):
         x = self.cross_attn_decoder(queries, latents)
         x = self.ln_post(x)
         x_1 = self.output_proj(x)
-        if self.supervision_type == 'occupancy-sdf':
+        if self.supervision_type == "occupancy-sdf":
             x_2 = self.output_proj_sdf(x)
             return x_1, x_2
         else:
@@ -271,34 +271,36 @@ class CrossAttentionDecoder(nn.Module):
 
 
 class ShapeAsLatentPerceiver(ShapeAsLatentModule):
-    def __init__(self, *,
-                 device: Optional[torch.device],
-                 dtype: Optional[torch.dtype],
-                 num_latents: int,
-                 point_feats: int = 0,
-                 embed_dim: int = 0,
-                 num_freqs: int = 8,
-                 include_pi: bool = True,
-                 width: int,
-                 heads: int,
-                 num_encoder_layers: int,
-                 num_decoder_layers: int,
-                 decoder_width: Optional[int] = None,
-                 init_scale: float = 0.25,
-                 qkv_bias: bool = True,
-                 flash: bool = False,
-                 use_ln_post: bool = False,
-                 use_checkpoint: bool = False,
-                 supervision_type: str = 'occupancy',
-                 query_method: bool = False,
-                 token_num: int = 256,
-                 grad_type: str = "numerical",
-                 grad_interval: float = 0.005,
-                 use_full_input: bool = True,
-                 freeze_encoder: bool = False,
-                 decoder_mlp_width_scale: int = 4,
-                 residual_kl: bool = False,
-                 ):
+    def __init__(
+        self,
+        *,
+        device: Optional[torch.device],
+        dtype: Optional[torch.dtype],
+        num_latents: int,
+        point_feats: int = 0,
+        embed_dim: int = 0,
+        num_freqs: int = 8,
+        include_pi: bool = True,
+        width: int,
+        heads: int,
+        num_encoder_layers: int,
+        num_decoder_layers: int,
+        decoder_width: Optional[int] = None,
+        init_scale: float = 0.25,
+        qkv_bias: bool = True,
+        flash: bool = False,
+        use_ln_post: bool = False,
+        use_checkpoint: bool = False,
+        supervision_type: str = "occupancy",
+        query_method: bool = False,
+        token_num: int = 256,
+        grad_type: str = "numerical",
+        grad_interval: float = 0.005,
+        use_full_input: bool = True,
+        freeze_encoder: bool = False,
+        decoder_mlp_width_scale: int = 4,
+        residual_kl: bool = False,
+    ):
 
         super().__init__()
 
@@ -328,7 +330,7 @@ class ShapeAsLatentPerceiver(ShapeAsLatentModule):
             use_checkpoint=use_checkpoint,
             query_method=query_method,
             use_full_input=use_full_input,
-            token_num=token_num
+            token_num=token_num,
         )
 
         self.embed_dim = embed_dim
@@ -342,7 +344,7 @@ class ShapeAsLatentPerceiver(ShapeAsLatentModule):
             self.latent_shape = (num_latents, embed_dim)
             if self.residual_kl:
                 assert self.post_kl.out_features % self.post_kl.in_features == 0
-                assert self.pre_kl.in_features % self.pre_kl.out_features == 0 
+                assert self.pre_kl.in_features % self.pre_kl.out_features == 0
         else:
             self.latent_shape = (num_latents, width)
 
@@ -356,7 +358,7 @@ class ShapeAsLatentPerceiver(ShapeAsLatentModule):
             init_scale=init_scale,
             qkv_bias=qkv_bias,
             flash=flash,
-            use_checkpoint=use_checkpoint
+            use_checkpoint=use_checkpoint,
         )
 
         # geometry decoder
@@ -373,7 +375,7 @@ class ShapeAsLatentPerceiver(ShapeAsLatentModule):
             flash=flash,
             use_checkpoint=use_checkpoint,
             supervision_type=supervision_type,
-            mlp_width_scale=decoder_mlp_width_scale
+            mlp_width_scale=decoder_mlp_width_scale,
         )
 
         if freeze_encoder:
@@ -383,11 +385,9 @@ class ShapeAsLatentPerceiver(ShapeAsLatentModule):
                 p.requires_grad = False
             print("freeze encoder and pre kl")
 
-    def forward(self,
-                pc: torch.FloatTensor,
-                feats: torch.FloatTensor,
-                volume_queries: torch.FloatTensor,
-                sample_posterior: bool = True):
+    def forward(
+        self, pc: torch.FloatTensor, feats: torch.FloatTensor, volume_queries: torch.FloatTensor, sample_posterior: bool = True
+    ):
         """
 
         Args:
@@ -413,39 +413,41 @@ class ShapeAsLatentPerceiver(ShapeAsLatentModule):
 
 class AlignedShapeLatentPerceiver(ShapeAsLatentPerceiver):
 
-    def __init__(self, *,
-                 device: Optional[torch.device],
-                 dtype: Optional[str],
-                 num_latents: int,
-                 point_feats: int = 0,
-                 embed_dim: int = 0,
-                 num_freqs: int = 8,
-                 include_pi: bool = True,
-                 width: int,
-                 heads: int,
-                 num_encoder_layers: int,
-                 num_decoder_layers: int,
-                 decoder_width: Optional[int] = None,
-                 init_scale: float = 0.25,
-                 qkv_bias: bool = True,
-                 flash: bool = False,
-                 use_ln_post: bool = False,
-                 use_checkpoint: bool = False,
-                 supervision_type: str = 'occupancy',
-                 grad_type: str = "numerical",
-                 grad_interval: float = 0.005,
-                 query_method: bool = False,
-                 use_full_input: bool = True,
-                 token_num: int = 256,
-                 freeze_encoder: bool = False,
-                 decoder_mlp_width_scale: int = 4,
-                 residual_kl: bool = False,
-                ):
+    def __init__(
+        self,
+        *,
+        device: Optional[torch.device],
+        dtype: Optional[str],
+        num_latents: int,
+        point_feats: int = 0,
+        embed_dim: int = 0,
+        num_freqs: int = 8,
+        include_pi: bool = True,
+        width: int,
+        heads: int,
+        num_encoder_layers: int,
+        num_decoder_layers: int,
+        decoder_width: Optional[int] = None,
+        init_scale: float = 0.25,
+        qkv_bias: bool = True,
+        flash: bool = False,
+        use_ln_post: bool = False,
+        use_checkpoint: bool = False,
+        supervision_type: str = "occupancy",
+        grad_type: str = "numerical",
+        grad_interval: float = 0.005,
+        query_method: bool = False,
+        use_full_input: bool = True,
+        token_num: int = 256,
+        freeze_encoder: bool = False,
+        decoder_mlp_width_scale: int = 4,
+        residual_kl: bool = False,
+    ):
 
         MAP_DTYPE = {
-            'float32': torch.float32,
-            'float16': torch.float16,
-            'bfloat16': torch.bfloat16,
+            "float32": torch.float32,
+            "float16": torch.float16,
+            "bfloat16": torch.bfloat16,
         }
         if dtype is not None:
             dtype = MAP_DTYPE[dtype]
@@ -480,11 +482,13 @@ class AlignedShapeLatentPerceiver(ShapeAsLatentPerceiver):
 
         self.width = width
 
-    def encode(self,
-               pc: torch.FloatTensor,
-               feats: Optional[torch.FloatTensor] = None,
-               sample_posterior: bool = True,
-               only_shape: bool=False):
+    def encode(
+        self,
+        pc: torch.FloatTensor,
+        feats: Optional[torch.FloatTensor] = None,
+        sample_posterior: bool = True,
+        only_shape: bool = False,
+    ):
         """
 
         Args:
@@ -505,9 +509,7 @@ class AlignedShapeLatentPerceiver(ShapeAsLatentPerceiver):
 
         return shape_embed, kl_embed, posterior, token_num, pre_pc
 
-    def encode_latents(self,
-                       pc: torch.FloatTensor,
-                       feats: Optional[torch.FloatTensor] = None):
+    def encode_latents(self, pc: torch.FloatTensor, feats: Optional[torch.FloatTensor] = None):
 
         x, _, token_num, pre_pc = self.encoder(pc, feats)
 
@@ -518,51 +520,52 @@ class AlignedShapeLatentPerceiver(ShapeAsLatentPerceiver):
 
         return shape_embed, latents, token_num, pre_pc
 
-    def forward(self,
-                pc: torch.FloatTensor,
-                feats: torch.FloatTensor,
-                volume_queries: torch.FloatTensor,
-                sample_posterior: bool = True):
+    def forward(
+        self, pc: torch.FloatTensor, feats: torch.FloatTensor, volume_queries: torch.FloatTensor, sample_posterior: bool = True
+    ):
         raise NotImplementedError()
+
 
 #####################################################
 # a simplified verstion of perceiver encoder
 #####################################################
 
+
 class ShapeAsLatentPerceiverEncoder(ShapeAsLatentModule):
-    def __init__(self, *,
-                 device: Optional[torch.device],
-                 dtype: Optional[Union[torch.dtype, str]],
-                 num_latents: int,
-                 point_feats: int = 0,
-                 embed_dim: int = 0,
-                 num_freqs: int = 8,
-                 include_pi: bool = True,
-                 width: int,
-                 heads: int,
-                 num_encoder_layers: int,
-                 init_scale: float = 0.25,
-                 qkv_bias: bool = True,
-                 flash: bool = False,
-                 use_ln_post: bool = False,
-                 use_checkpoint: bool = False,
-                 supervision_type: str = 'occupancy',
-                 query_method: bool = False,
-                 token_num: int = 256,
-                 grad_type: str = "numerical",
-                 grad_interval: float = 0.005,
-                 use_full_input: bool = True,
-                 freeze_encoder: bool = False,
-                 residual_kl: bool = False,
-                 ):
+    def __init__(
+        self,
+        *,
+        device: Optional[torch.device],
+        dtype: Optional[Union[torch.dtype, str]],
+        num_latents: int,
+        point_feats: int = 0,
+        embed_dim: int = 0,
+        num_freqs: int = 8,
+        include_pi: bool = True,
+        width: int,
+        heads: int,
+        num_encoder_layers: int,
+        init_scale: float = 0.25,
+        qkv_bias: bool = True,
+        flash: bool = False,
+        use_ln_post: bool = False,
+        use_checkpoint: bool = False,
+        supervision_type: str = "occupancy",
+        query_method: bool = False,
+        token_num: int = 256,
+        grad_type: str = "numerical",
+        grad_interval: float = 0.005,
+        use_full_input: bool = True,
+        freeze_encoder: bool = False,
+        residual_kl: bool = False,
+    ):
 
         super().__init__()
 
-
         MAP_DTYPE = {
-            'float32': torch.float32,
-            'float16': torch.float16,
-            'bfloat16': torch.bfloat16,
+            "float32": torch.float32,
+            "float16": torch.float16,
+            "bfloat16": torch.bfloat16,
         }
 
         if dtype is not None and isinstance(dtype, str):
@@ -606,9 +609,7 @@ class ShapeAsLatentPerceiverEncoder(ShapeAsLatentModule):
             print("freeze encoder")
         self.width = width
 
-    def encode_latents(self,
-                       pc: torch.FloatTensor,
-                       feats: Optional[torch.FloatTensor] = None):
+    def encode_latents(self, pc: torch.FloatTensor, feats: Optional[torch.FloatTensor] = None):
 
         x, _, token_num, pre_pc = self.encoder(pc, feats)
 

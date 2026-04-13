@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # This file is part of UniRig.
-# 
+#
 # This file is derived from https://github.com/NeuralCarver/Michelangelo
 #
 # Copyright (c) https://github.com/NeuralCarver/Michelangelo original authors
@@ -20,10 +20,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import math
+
 import numpy as np
 import torch
 import torch.nn as nn
-import math
 
 VALID_EMBED_TYPES = ["identity", "fourier", "hashgrid", "sphere_harmonic", "triplane_fourier"]
 
@@ -65,29 +66,17 @@ class FourierEmbedder(nn.Module):
 
     """
 
-    def __init__(self,
-                 num_freqs: int = 6,
-                 logspace: bool = True,
-                 input_dim: int = 3,
-                 include_input: bool = True,
-                 include_pi: bool = True) -> None:
-
+    def __init__(
+        self, num_freqs: int = 6, logspace: bool = True, input_dim: int = 3, include_input: bool = True, include_pi: bool = True
+    ) -> None:
         """The initialization"""
 
         super().__init__()
 
         if logspace:
-            frequencies = 2.0 ** torch.arange(
-                num_freqs,
-                dtype=torch.float32
-            )
+            frequencies = 2.0 ** torch.arange(num_freqs, dtype=torch.float32)
         else:
-            frequencies = torch.linspace(
-                1.0,
-                2.0 ** (num_freqs - 1),
-                num_freqs,
-                dtype=torch.float32
-            )
+            frequencies = torch.linspace(1.0, 2.0 ** (num_freqs - 1), num_freqs, dtype=torch.float32)
 
         if include_pi:
             frequencies *= torch.pi
@@ -105,7 +94,7 @@ class FourierEmbedder(nn.Module):
         return out_dim
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """ Forward process.
+        """Forward process.
 
         Args:
             x: tensor of shape [..., dim]
@@ -126,7 +115,8 @@ class FourierEmbedder(nn.Module):
 
 
 class LearnedFourierEmbedder(nn.Module):
-    """ following @crowsonkb "s lead with learned sinusoidal pos emb """
+    """following @crowsonkb "s lead with learned sinusoidal pos emb"""
+
     """ https://github.com/crowsonkb/v-diffusion-jax/blob/master/diffusion/models/danbooru_128.py#L8 """
 
     def __init__(self, in_channels, dim):
@@ -178,8 +168,8 @@ def sequential_pos_embed(num_len, embed_dim):
 
     pos = torch.arange(num_len, dtype=torch.float32)
     omega = torch.arange(embed_dim // 2, dtype=torch.float32)
-    omega /= embed_dim / 2.
-    omega = 1. / 10000 ** omega  # (D/2,)
+    omega /= embed_dim / 2.0
+    omega = 1.0 / 10000**omega  # (D/2,)
 
     pos = pos.reshape(-1)  # (M,)
     out = torch.einsum("m,d->md", pos, omega)  # (M, D/2), outer product
@@ -202,9 +192,9 @@ def timestep_embedding(timesteps, dim, max_period=10000):
     :return: an [N x dim] Tensor of positional embeddings.
     """
     half = dim // 2
-    freqs = torch.exp(
-        -math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half
-    ).to(device=timesteps.device)
+    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(
+        device=timesteps.device
+    )
     args = timesteps[:, None].to(timesteps.dtype) * freqs[None]
     embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
     if dim % 2:
@@ -212,15 +202,23 @@ def timestep_embedding(timesteps, dim, max_period=10000):
     return embedding
 
 
-def get_embedder(embed_type="fourier", num_freqs=-1, input_dim=3, degree=4,
-                 num_levels=16, level_dim=2, per_level_scale=2, base_resolution=16,
-                 log2_hashmap_size=19, desired_resolution=None):
+def get_embedder(
+    embed_type="fourier",
+    num_freqs=-1,
+    input_dim=3,
+    degree=4,
+    num_levels=16,
+    level_dim=2,
+    per_level_scale=2,
+    base_resolution=16,
+    log2_hashmap_size=19,
+    desired_resolution=None,
+):
     if embed_type == "identity" or (embed_type == "fourier" and num_freqs == -1):
         return nn.Identity(), input_dim
 
     elif embed_type == "fourier":
-        embedder_obj = FourierEmbedder(num_freqs=num_freqs, input_dim=input_dim,
-                                       logspace=True, include_input=True)
+        embedder_obj = FourierEmbedder(num_freqs=num_freqs, input_dim=input_dim, logspace=True, include_input=True)
         return embedder_obj, embedder_obj.out_dim
 
     elif embed_type == "hashgrid":

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # This file is part of UniRig.
-# 
+#
 # This file is derived from https://github.com/NeuralCarver/Michelangelo
 #
 # Copyright (c) https://github.com/NeuralCarver/Michelangelo original authors
@@ -20,9 +20,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import torch.nn as nn
-from typing import Tuple, List, Optional
+from typing import List, Optional, Tuple
+
 import lightning.pytorch as pl
+import torch.nn as nn
 
 
 class Point2MeshOutput(object):

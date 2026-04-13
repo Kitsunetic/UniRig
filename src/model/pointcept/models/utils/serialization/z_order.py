@@ -1,5 +1,6 @@
-import torch
 from typing import Optional, Union
+
+import torch
 
 
 class KeyLUT:
@@ -34,12 +35,7 @@ class KeyLUT:
         key = torch.zeros_like(x)
         for i in range(depth):
             mask = 1 << i
-            key = (
-                key
-                | ((x & mask) << (2 * i + 2))
-                | ((y & mask) << (2 * i + 1))
-                | ((z & mask) << (2 * i + 0))
-            )
+            key = key | ((x & mask) << (2 * i + 2)) | ((y & mask) << (2 * i + 1)) | ((z & mask) << (2 * i + 0))
         return key
 
     def key2xyz(self, key, depth):

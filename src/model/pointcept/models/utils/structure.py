@@ -1,15 +1,16 @@
-import torch
 import spconv.pytorch as spconv
+import torch
 
 try:
     import ocnn
 except ImportError:
     ocnn = None
+import torch_scatter
 from addict import Dict
 
-from .serialization import encode, decode
-from ..utils import offset2batch, batch2offset
-import torch_scatter
+from ..utils import batch2offset, offset2batch
+from .serialization import decode, encode
+
 
 class Point(Dict):
     """
@@ -95,17 +96,13 @@ class Point(Dict):
         #  Order2 ([n]),
         #   ...
         #  OrderN ([n])] (k, n)
-        code = [
-            encode(self.grid_coord, self.batch, depth, order=order_) for order_ in order
-        ]
+        code = [encode(self.grid_coord, self.batch, depth, order=order_) for order_ in order]
         code = torch.stack(code)
         order = torch.argsort(code)
         inverse = torch.zeros_like(order).scatter_(
             dim=1,
             index=order,
-            src=torch.arange(0, code.shape[1], device=order.device).repeat(
-                code.shape[0], 1
-            ),
+            src=torch.arange(0, code.shape[1], device=order.device).repeat(code.shape[0], 1),
         )
 
         if shuffle_orders:
@@ -155,14 +152,10 @@ class Point(Dict):
         if "sparse_shape" in self.keys():
             sparse_shape = self.sparse_shape
         else:
-            sparse_shape = torch.add(
-                torch.max(self.grid_coord, dim=0).values, pad
-            ).tolist()
+            sparse_shape = torch.add(torch.max(self.grid_coord, dim=0).values, pad).tolist()
         sparse_conv_feat = spconv.SparseConvTensor(
             features=self.feat,
-            indices=torch.cat(
-                [self.batch.unsqueeze(-1).int(), self.grid_coord.int()], dim=1
-            ).contiguous(),
+            indices=torch.cat([self.batch.unsqueeze(-1).int(), self.grid_coord.int()], dim=1).contiguous(),
             spatial_shape=sparse_shape,
             batch_size=self.batch[-1].tolist() + 1,
         )
@@ -176,9 +169,7 @@ class Point(Dict):
         Generate octree with OCNN
         relay on ["grid_coord", "batch", "feat"]
         """
-        assert (
-            ocnn is not None
-        ), "Please follow https://github.com/octree-nn/ocnn-pytorch install ocnn."
+        assert ocnn is not None, "Please follow https://github.com/octree-nn/ocnn-pytorch install ocnn."
         assert {"grid_coord", "feat", "batch"}.issubset(self.keys())
         # add 1 to make grid space support shift order
         if depth is None:

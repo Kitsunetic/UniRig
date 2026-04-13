@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # This file is part of UniRig.
-# 
+#
 # This file is derived from https://github.com/NeuralCarver/Michelangelo
 #
 # Copyright (c) https://github.com/NeuralCarver/Michelangelo original authors
@@ -24,11 +24,8 @@ import torch
 
 from .models.tsal.sal_perceiver import AlignedShapeLatentPerceiver, ShapeAsLatentPerceiverEncoder
 
-def get_encoder(
-    pretrained_path: str=None,
-    freeze_decoder: bool=False,
-    **kwargs
-) -> AlignedShapeLatentPerceiver:
+
+def get_encoder(pretrained_path: str = None, freeze_decoder: bool = False, **kwargs) -> AlignedShapeLatentPerceiver:
     model = AlignedShapeLatentPerceiver(**kwargs)
     if pretrained_path is not None:
         state_dict = torch.load(pretrained_path, weights_only=True)
@@ -41,10 +38,8 @@ def get_encoder(
         model.transformer.requires_grad_(False)
     return model
 
-def get_encoder_simplified(
-    pretrained_path: str=None,
-    **kwargs
-) -> ShapeAsLatentPerceiverEncoder:
+
+def get_encoder_simplified(pretrained_path: str = None, **kwargs) -> ShapeAsLatentPerceiverEncoder:
     model = ShapeAsLatentPerceiverEncoder(**kwargs)
     if pretrained_path is not None:
         state_dict = torch.load(pretrained_path, weights_only=True)

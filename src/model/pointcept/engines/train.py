@@ -1,41 +1,47 @@
 import os
 import sys
 import weakref
+
 import torch
-torch.multiprocessing.set_start_method('spawn')
+
+torch.multiprocessing.set_start_method("spawn")
+from functools import partial
+
 import torch.nn as nn
 import torch.utils.data
-from functools import partial
 
 if sys.version_info >= (3, 10):
     from collections.abc import Iterator
 else:
     from collections import Iterator
+
+import pointcept.utils.comm as comm
+from pointcept.datasets import build_dataset, collate_fn, point_collate_fn
+from pointcept.models import build_model
+from pointcept.utils.events import EventStorage
+from pointcept.utils.logger import get_root_logger
+from pointcept.utils.optimizer import build_optimizer
+from pointcept.utils.registry import Registry
+from pointcept.utils.scheduler import build_scheduler
+from pointcept.utils.timer import Timer
+from sklearn.preprocessing import QuantileTransformer
 from tensorboardX import SummaryWriter
 
 from .defaults import create_ddp_model, worker_init_fn
 from .hooks import HookBase, build_hooks
-import pointcept.utils.comm as comm
-from pointcept.datasets import build_dataset, point_collate_fn, collate_fn
-from pointcept.models import build_model
-from pointcept.utils.logger import get_root_logger
-from pointcept.utils.optimizer import build_optimizer
-from pointcept.utils.scheduler import build_scheduler
-from pointcept.utils.events import EventStorage
-from pointcept.utils.registry import Registry
-
-from sklearn.preprocessing import QuantileTransformer
-from pointcept.utils.timer import Timer
 
 TRAINERS = Registry("trainers")
-from cuml.cluster.hdbscan import HDBSCAN
-# from sklearn.cluster import HDBSCAN
-import open3d as o3d
+from collections import OrderedDict
+
 import matplotlib.colors as mcolors
 import numpy as np
-from collections import OrderedDict
-import trimesh
+
+# from sklearn.cluster import HDBSCAN
+import open3d as o3d
 import pointops
+import trimesh
+from cuml.cluster.hdbscan import HDBSCAN
+
 
 class TrainerBase:
     def __init__(self) -> None:
@@ -210,8 +216,8 @@ class Trainer(TrainerBase):
                 if self.epoch % 10 == 0:
                     self.logger.info(
                         f"iter: {self.epoch}, total_loss: {loss.item()}, loss_1: {loss_dict['instance_loss_1'].item()}, loss_2: {loss_dict['instance_loss_2'].item()}, loss_3: {loss_dict['instance_loss_3'].item()}"
-                        )
-                
+                    )
+
                 # !!! optimizer
                 self.optimizer.zero_grad()
                 if self.cfg.enable_amp:
@@ -242,7 +248,7 @@ class Trainer(TrainerBase):
                     )
                     os.replace(filename + ".tmp", filename)
             self.eval()
-    
+
     def eval(self):
         # val_data = build_dataset(self.cfg.data.val)
         self.logger.info("=> Loading checkpoint & weight ...")
@@ -256,7 +262,7 @@ class Trainer(TrainerBase):
         else:
             self.logger.info(f"No weight found at: {self.cfg.weight}")
             self.cfg.weight = "last"
-    
+
         self.model.eval()
         save_root = os.path.join(self.cfg.save_path, "vis_pcd", os.path.splitext(os.path.basename(self.cfg.weight))[0])
         os.makedirs(save_root, exist_ok=True)
@@ -264,9 +270,11 @@ class Trainer(TrainerBase):
         os.makedirs(group_save_root, exist_ok=True)
 
         hex_colors = list(mcolors.CSS4_COLORS.values())
-        rgb_colors = np.array([mcolors.to_rgb(color) for color in hex_colors if color not in ['#000000', '#FFFFFF']])
+        rgb_colors = np.array([mcolors.to_rgb(color) for color in hex_colors if color not in ["#000000", "#FFFFFF"]])
+
         def relative_luminance(color):
             return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]
+
         rgb_colors = [color for color in rgb_colors if (relative_luminance(color) > 0.4 and relative_luminance(color) < 0.8)]
         np.random.shuffle(rgb_colors)
         input_dict = self.train_loader.val_data()
@@ -304,7 +312,6 @@ class Trainer(TrainerBase):
                     indices = indices[:, 0].cpu().numpy()
                     labels[invalid_label_mask] = labels[~invalid_label_mask][indices]
 
-            
             # np.save(os.path.join(group_save_root, f"{str(scale)}.npy"), labels)
             save_path = os.path.join(save_root, f"{str(scale)}.ply")
             coord = input_dict["obj"]["coord"].cpu().numpy()
@@ -364,8 +371,7 @@ class Trainer(TrainerBase):
                 # Save the new mesh
                 mesh_save_path = os.path.join(save_root, f"mesh_{str(scale)}.ply")
                 mesh.export(mesh_save_path)
-                
-    
+
     def _get_quantile_func(self, scales: torch.Tensor, distribution="normal"):
         """
         Use 3D scale statistics to normalize scales -- use quantile transformer.
@@ -383,9 +389,7 @@ class Trainer(TrainerBase):
         def quantile_transformer_func(scales):
             # This function acts as a wrapper for QuantileTransformer.
             # QuantileTransformer expects a numpy array, while we have a torch tensor.
-            return torch.Tensor(
-                quantile_transformer.transform(scales.cpu().numpy())
-            ).to(scales.device)
+            return torch.Tensor(quantile_transformer.transform(scales.cpu().numpy())).to(scales.device)
 
         return quantile_transformer_func
 
